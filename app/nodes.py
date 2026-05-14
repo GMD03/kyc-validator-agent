@@ -94,3 +94,48 @@ def extractor_node(state: KYCState) -> dict:
             "errors": current_errors + [f"Extraction failed: {str(e)}"],
             "extraction_attempts": attempts + 1
         }
+
+# ---------------------------------------------------------
+# 4. THE VALIDATOR NODE
+# ---------------------------------------------------------
+def validator_node(state: KYCState) -> dict:
+    """
+    Checks the extracted data against business rules and user inputs.
+    """
+    print("--- RUNNING VALIDATOR NODE ---")
+    
+    extracted_name = state.get("extracted_name", "")
+    user_name = state.get("user_provided_name", "")
+    current_errors = state.get("errors", [])
+    
+    new_errors = []
+    
+    # 1. Missing Data Check (In case Llama missed a field)
+    if not extracted_name or not state.get("extracted_dob") or not state.get("extracted_id_number"):
+        new_errors.append("Missing required fields from the ID.")
+        
+    # 2. Name Match Check (Fraud prevention)
+    if extracted_name and user_name:
+        if extracted_name.strip().lower() != user_name.strip().lower():
+            new_errors.append(f"Name mismatch: User entered '{user_name}' but ID says '{extracted_name}'.")
+            
+    # Return the updated error list to the state
+    return {"errors": current_errors + new_errors}
+
+# ---------------------------------------------------------
+# 5. THE DATABASE MOCK NODE
+# ---------------------------------------------------------
+def database_check_node(state: KYCState) -> dict:
+    """
+    Mocks a government Ayuda or Fintech compliance database check.
+    """
+    print("--- RUNNING DATABASE CHECK ---")
+    id_number = state.get("extracted_id_number")
+    
+    # Mock blacklisted IDs for fraud testing
+    blacklisted_ids = ["123456789", "999999999", "000000000"]
+    
+    if id_number in blacklisted_ids:
+        return {"final_status": "REJECTED_BLACKLISTED"}
+        
+    return {"final_status": "APPROVED"}
