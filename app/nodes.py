@@ -1,7 +1,11 @@
+import base64
 from pydantic import BaseModel, Field
-from typing import Optional
+from langchain_ollama import ChatOllama
+from app.state import KYCState
 
-# This is the strict schema we will force the LLM to output
+# ---------------------------------------------------------
+# 1. THE DATA SCHEMA (The Bouncer)
+# ---------------------------------------------------------
 class IDExtractionSchema(BaseModel):
     extracted_name: str = Field(
         description="The full legal name exactly as it appears on the ID document. Format as First Last."
@@ -13,5 +17,80 @@ class IDExtractionSchema(BaseModel):
         description="The unique alphanumeric identification number on the document."
     )
     is_expired: bool = Field(
-        description="Evaluate the expiration date on the card. Return True if the card is expired as of today, False if it is still valid."
+        description="Evaluate the expiration date. Return True if the card is expired as of today, False if valid."
     )
+
+# ---------------------------------------------------------
+# 2. HELPER FUNCTION
+# ---------------------------------------------------------
+def encode_image(image_path: str) -> str:
+    """Converts a local image file to a base64 string for the LLM."""
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+# ---------------------------------------------------------
+# 3. THE EXTRACTOR NODE (The Worker)
+# ---------------------------------------------------------
+def extractor_node(state: KYCState) -> dict:
+    """
+    Reads the ID image using Llama 3.2 Vision and extracts structured data.
+    """
+    print("--- RUNNING EXTRACTOR NODE ---")
+    
+    image_path = state.get("image_path")
+    attempts = state.get("extraction_attempts", 0)
+    current_errors = state.get("errors", [])
+
+    # Attempt to load and encode the image
+    try:
+        base64_image = encode_image(image_path)
+    except Exception as e:
+        return {"errors": current_errors + [f"System error: Could not load image file at {image_path}"]}
+
+    # Initialize the local Llama Vision model
+    # Temperature 0 ensures factual extraction without creative hallucination
+    llm = ChatOllama(
+        model="llama3.2-vision",
+        temperature=0
+    )
+
+    # Bind our Pydantic schema to force the LLM to output strict JSON
+    structured_llm = llm.with_structured_output(IDExtractionSchema)
+
+    # Construct the multimodal prompt
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text", 
+                    "text": "You are a strict compliance officer. Analyze this ID document and extract the required fields exactly as specified in the schema. Do not include any conversational text."
+                },
+                {
+                    "type": "image_url", 
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                }
+            ]
+        }
+    ]
+
+    # Execute the extraction
+    try:
+        result = structured_llm.invoke(messages)
+        
+        # LangGraph updates the state by merging this returned dictionary
+        return {
+            "extracted_name": result.extracted_name,
+            "extracted_dob": result.extracted_dob,
+            "extracted_id_number": result.extracted_id_number,
+            "extraction_attempts": attempts + 1,
+            # We append a temporary flag here so the Validator Node knows if it expired
+            "errors": current_errors + ["ID is expired."] if result.is_expired else current_errors
+        }
+        
+    except Exception as e:
+        # If the LLM fails to parse the schema or read the image, we catch it gracefully
+        return {
+            "errors": current_errors + [f"Extraction failed: {str(e)}"],
+            "extraction_attempts": attempts + 1
+        }
