@@ -3,15 +3,18 @@ from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 from app.state import KYCState
 
+import re
+from datetime import datetime
+
 # ---------------------------------------------------------
 # 1. THE DATA SCHEMA (The Bouncer)
 # ---------------------------------------------------------
 class IDExtractionSchema(BaseModel):
     extracted_name: str = Field(
-        description="The full legal name exactly as it appears on the ID document. Format as First Last."
+        description="The full legal name. Regardless of the format on the ID (e.g., 'Last, First Middle'), you MUST standardize the output to 'First Middle Last' format. Remove any commas."
     )
     extracted_dob: str = Field(
-        description="The date of birth found on the ID. MUST be in YYYY-MM-DD format."
+        description="The date of birth on the ID. Regardless of how it is written on the card (e.g., 'August 19, 2003'), you MUST convert it to 'YYYY-MM-DD' format."
     )
     extracted_id_number: str = Field(
         description="The unique alphanumeric identification number on the document."
@@ -24,10 +27,28 @@ class IDExtractionSchema(BaseModel):
 # 2. HELPER FUNCTION
 # ---------------------------------------------------------
 def encode_image(image_path: str) -> str:
-    """Converts a local image file to a base64 string for the LLM."""
+    """Encodes an image to base64 string."""
     with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
+        return base64.b64encode(image_file.read()).decode("utf-8")
 
+def standardize_date(date_str: str):
+    """Translates messy date strings into comparable Date objects."""
+    if not date_str:
+        return None
+
+    # (YYYY-MM-DD, MM/DD/YYYY, August 19, 2003, Aug 19 2003, etc.)
+    formats = ["%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%d/%m/%Y", "%d-%m-%Y"]
+    
+    clean_date = date_str.strip()
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(clean_date, fmt).date()
+        except ValueError:
+            continue 
+            
+    return None 
+    
 # ---------------------------------------------------------
 # 3. THE EXTRACTOR NODE (The Worker)
 # ---------------------------------------------------------
@@ -100,26 +121,39 @@ def extractor_node(state: KYCState) -> dict:
 # ---------------------------------------------------------
 def validator_node(state: KYCState) -> dict:
     """
-    Checks the extracted data against business rules and user inputs.
+    Checks the extracted data against business rules and user inputs using order-agnostic matching.
     """
     print("--- RUNNING VALIDATOR NODE ---")
     
     extracted_name = state.get("extracted_name", "")
     user_name = state.get("user_provided_name", "")
-    current_errors = state.get("errors", [])
+    extracted_dob_raw = state.get("extracted_dob", "")
+    user_dob_raw = state.get("user_provided_dob", "")
     
+    current_errors = state.get("errors", [])
     new_errors = []
     
-    # 1. Missing Data Check (In case Llama missed a field)
-    if not extracted_name or not state.get("extracted_dob") or not state.get("extracted_id_number"):
+    # 1. Missing Data Check
+    if not extracted_name or not extracted_dob_raw or not state.get("extracted_id_number"):
         new_errors.append("Missing required fields from the ID.")
         
-    # 2. Name Match Check (Fraud prevention)
+    # 2. Advanced Name Match Check (Order-Agnostic)
     if extracted_name and user_name:
-        if extracted_name.strip().lower() != user_name.strip().lower():
+        user_words = set(re.sub(r'[^a-z\s]', '', user_name.lower()).split())
+        extracted_words = set(re.sub(r'[^a-z\s]', '', extracted_name.lower()).split())
+        if user_words != extracted_words:
             new_errors.append(f"Name mismatch: User entered '{user_name}' but ID says '{extracted_name}'.")
+
+
+    if extracted_dob_raw and user_dob_raw:
+        user_dob_obj = standardize_date(user_dob_raw)
+        extracted_dob_obj = standardize_date(extracted_dob_raw)
+        
+        if not user_dob_obj or not extracted_dob_obj:
+            new_errors.append("System error: Could not parse one of the dates into a standard format.")
+        elif user_dob_obj != extracted_dob_obj:
+            new_errors.append(f"DOB mismatch: User entered '{user_dob_raw}' but ID says '{extracted_dob_raw}'.")
             
-    # Return the updated error list to the state
     return {"errors": current_errors + new_errors}
 
 # ---------------------------------------------------------
