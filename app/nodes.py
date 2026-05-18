@@ -137,11 +137,11 @@ def validator_node(state: KYCState) -> dict:
     if not extracted_name or not extracted_dob_raw or not state.get("extracted_id_number"):
         new_errors.append("Missing required fields from the ID.")
         
-    # 2. Advanced Name Match Check (Order-Agnostic)
+    # 2. Advanced Name Match Check (Order-Agnostic & Flexible)
     if extracted_name and user_name:
         user_words = set(re.sub(r'[^a-z\s]', '', user_name.lower()).split())
         extracted_words = set(re.sub(r'[^a-z\s]', '', extracted_name.lower()).split())
-        if user_words != extracted_words:
+        if not user_words.issubset(extracted_words):
             new_errors.append(f"Name mismatch: User entered '{user_name}' but ID says '{extracted_name}'.")
 
 
