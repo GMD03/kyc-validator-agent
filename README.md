@@ -6,7 +6,7 @@ An autonomous, multi-agent AI backend designed to orchestrate KYC (Know Your Cus
 
 This project moves beyond linear scripts by utilizing a **Stateful, Cyclic LangGraph Architecture**:
 1. **Extractor Node:** Uses `Llama 3.2 Vision` via Ollama to perform OCR and structured data extraction from ID images.
-2. **Validator Node:** Applies strict Python-based business logic to check for missing fields, standardize varied date formats (e.g., "August 19, 2003" -> `2003-08-19`), and perform order-agnostic name matching.
+2. **Validator Node:** Applies strict Python-based business logic to check for missing fields, standardize varied date formats (e.g., "December 23, 2000" -> `2000-12-23`), and perform order-agnostic name matching.
 3. **Database Mock Node:** Simulates an external compliance check (e.g., Ayuda/Fintech blocklists).
 4. **Conditional Router:** Features self-correction loops for LLM hallucinations and Human-in-the-Loop (HITL) escalation for suspected fraud.
 
@@ -18,7 +18,7 @@ This project moves beyond linear scripts by utilizing a **Stateful, Cyclic LangG
 
 ## How to Run Locally
 
-### 1. Prerequisites
+### Prerequisites
 * Python 3.10+
 * [Ollama](https://ollama.com/) installed and running on your machine.
 * Download the Llama Vision model:

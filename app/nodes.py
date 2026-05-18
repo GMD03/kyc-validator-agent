@@ -6,9 +6,7 @@ from app.state import KYCState
 import re
 from datetime import datetime
 
-# ---------------------------------------------------------
-# 1. THE DATA SCHEMA (The Bouncer)
-# ---------------------------------------------------------
+# DATA SCHEMA 
 class IDExtractionSchema(BaseModel):
     extracted_name: str = Field(
         description="The full legal name. Regardless of the format on the ID (e.g., 'Last, First Middle'), you MUST standardize the output to 'First Middle Last' format. Remove any commas."
@@ -23,9 +21,7 @@ class IDExtractionSchema(BaseModel):
         description="Evaluate the expiration date. Return True if the card is expired as of today, False if valid."
     )
 
-# ---------------------------------------------------------
-# 2. HELPER FUNCTION
-# ---------------------------------------------------------
+# HELPER FUNCTION
 def encode_image(image_path: str) -> str:
     """Encodes an image to base64 string."""
     with open(image_path, "rb") as image_file:
@@ -36,7 +32,7 @@ def standardize_date(date_str: str):
     if not date_str:
         return None
 
-    # (YYYY-MM-DD, MM/DD/YYYY, August 19, 2003, Aug 19 2003, etc.)
+    # (YYYY-MM-DD, MM/DD/YYYY, MON DD, YYYY)
     formats = ["%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y", "%d/%m/%Y", "%d-%m-%Y"]
     
     clean_date = date_str.strip()
@@ -48,10 +44,8 @@ def standardize_date(date_str: str):
             continue 
             
     return None 
-    
-# ---------------------------------------------------------
-# 3. THE EXTRACTOR NODE (The Worker)
-# ---------------------------------------------------------
+
+# EXTRACTOR NODE 
 def extractor_node(state: KYCState) -> dict:
     """
     Reads the ID image using Llama 3.2 Vision and extracts structured data.
@@ -62,23 +56,21 @@ def extractor_node(state: KYCState) -> dict:
     attempts = state.get("extraction_attempts", 0)
     current_errors = state.get("errors", [])
 
-    # Attempt to load and encode the image
     try:
         base64_image = encode_image(image_path)
     except Exception as e:
         return {"errors": current_errors + [f"System error: Could not load image file at {image_path}"]}
 
-    # Initialize the local Llama Vision model
-    # Temperature 0 ensures factual extraction without creative hallucination
+    # Initialize Llama Vision 
     llm = ChatOllama(
         model="llama3.2-vision",
         temperature=0
     )
 
-    # Bind our Pydantic schema to force the LLM to output strict JSON
+    # Bind Pydantic schema to output strict JSON
     structured_llm = llm.with_structured_output(IDExtractionSchema)
 
-    # Construct the multimodal prompt
+    # Multimodal prompt
     messages = [
         {
             "role": "user",
@@ -95,30 +87,24 @@ def extractor_node(state: KYCState) -> dict:
         }
     ]
 
-    # Execute the extraction
     try:
         result = structured_llm.invoke(messages)
         
-        # LangGraph updates the state by merging this returned dictionary
         return {
             "extracted_name": result.extracted_name,
             "extracted_dob": result.extracted_dob,
             "extracted_id_number": result.extracted_id_number,
             "extraction_attempts": attempts + 1,
-            # We append a temporary flag here so the Validator Node knows if it expired
             "errors": current_errors + ["ID is expired."] if result.is_expired else current_errors
         }
         
     except Exception as e:
-        # If the LLM fails to parse the schema or read the image, we catch it gracefully
         return {
             "errors": current_errors + [f"Extraction failed: {str(e)}"],
             "extraction_attempts": attempts + 1
         }
 
-# ---------------------------------------------------------
-# 4. THE VALIDATOR NODE
-# ---------------------------------------------------------
+# VALIDATOR NODE
 def validator_node(state: KYCState) -> dict:
     """
     Checks the extracted data against business rules and user inputs using order-agnostic matching.
@@ -133,11 +119,11 @@ def validator_node(state: KYCState) -> dict:
     current_errors = state.get("errors", [])
     new_errors = []
     
-    # 1. Missing Data Check
+    # Missing Data Check
     if not extracted_name or not extracted_dob_raw or not state.get("extracted_id_number"):
         new_errors.append("Missing required fields from the ID.")
         
-    # 2. Advanced Name Match Check (Order-Agnostic & Flexible)
+    # Advanced Name Match Check (Order-Agnostic & Flexible)
     if extracted_name and user_name:
         user_words = set(re.sub(r'[^a-z\s]', '', user_name.lower()).split())
         extracted_words = set(re.sub(r'[^a-z\s]', '', extracted_name.lower()).split())
@@ -156,9 +142,8 @@ def validator_node(state: KYCState) -> dict:
             
     return {"errors": current_errors + new_errors}
 
-# ---------------------------------------------------------
-# 5. THE DATABASE MOCK NODE
-# ---------------------------------------------------------
+
+# DATABASE MOCK NODE
 def database_check_node(state: KYCState) -> dict:
     """
     Mocks a government Ayuda or Fintech compliance database check.

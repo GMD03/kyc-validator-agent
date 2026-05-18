@@ -14,4 +14,4 @@ class KYCState(TypedDict):
     # System Logic & Status
     extraction_attempts: int
     errors: List[str]
-    final_status: Optional[str] # Will update to: PENDING, APPROVED, REJECTED, or MANUAL_REVIEW
+    final_status: Optional[str] 

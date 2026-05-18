@@ -25,7 +25,6 @@ async def validate_kyc_endpoint(request: KYCRequest):
     Triggers the LangGraph KYC workflow for a given ID image and user data.
     """
     try:
-        # Initial state to feed into the graph
         initial_state = {
             "image_path": request.image_path,
             "user_provided_name": request.user_provided_name,
@@ -34,10 +33,8 @@ async def validate_kyc_endpoint(request: KYCRequest):
             "errors": []
         }
 
-        # .invoke() runs the entire graph from start to finish (END)
         final_state = kyc_agent.invoke(initial_state)
 
-        # Structure the response
         return {
             "extraction_attempts": final_state.get("extraction_attempts", 0),
             "final_status": final_state.get("final_status", "UNKNOWN"),
@@ -52,7 +49,6 @@ async def validate_kyc_endpoint(request: KYCRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent Execution Error: {str(e)}")
 
-# 5. Root endpoint for health checks
 @app.get("/")
 def read_root():
     return {"message": "KYC Validator Agent is Online"}
